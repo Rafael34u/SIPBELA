@@ -1,0 +1,145 @@
+<?php
+
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\RegisterController;
+use App\Http\Controllers\Admin\DashboardController as AdminDashboard;
+use App\Http\Controllers\Admin\BarangController;
+use App\Http\Controllers\Admin\PeminjamanController as AdminPeminjaman;
+use App\Http\Controllers\Admin\LaporanController;
+use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Admin\MateriController;
+use App\Http\Controllers\Siswa\DashboardController as SiswaDashboard;
+use App\Http\Controllers\Siswa\PeminjamanController as SiswaPeminjaman;
+use App\Http\Controllers\Siswa\MateriController as SiswaMateri;
+use Illuminate\Support\Facades\Route;
+
+// ─── Redirect root ────────────────────────────────────────────────────────────
+Route::get('/', function () {
+    if (auth()->check()) {
+        $role = auth()->user()->role;
+        if ($role === 'superadmin') return redirect()->route('superadmin.dashboard');
+        if ($role === 'admin_bengkel') return redirect()->route('admin.dashboard');
+        if ($role === 'admin_perpus') return redirect()->route('perpustakaan.admin.dashboard');
+        return redirect()->route('portal');
+    }
+    return redirect()->route('login');
+});
+
+// ─── Portal Siswa (Pilihan Bengkel / Perpus) ──────────────────────────────────
+Route::get('/portal', function () {
+    return view('portal');
+})->middleware(['auth', 'role:siswa'])->name('portal');
+
+// ─── Superadmin Routes ────────────────────────────────────────────────────────
+Route::prefix('superadmin')
+    ->middleware(['auth', 'role:superadmin'])
+    ->name('superadmin.')
+    ->group(function () {
+        Route::get('/dashboard', [\App\Http\Controllers\Superadmin\DashboardController::class, 'index'])->name('dashboard');
+        
+        // Master Data NIS Terverifikasi
+        Route::get('/siswa', [\App\Http\Controllers\Superadmin\MasterSiswaController::class, 'index'])->name('siswa.index');
+        Route::post('/siswa/store', [\App\Http\Controllers\Superadmin\MasterSiswaController::class, 'store'])->name('siswa.store');
+        Route::get('/siswa/{id}/edit', [\App\Http\Controllers\Superadmin\MasterSiswaController::class, 'edit'])->name('siswa.edit');
+        Route::put('/siswa/{id}', [\App\Http\Controllers\Superadmin\MasterSiswaController::class, 'update'])->name('siswa.update');
+        Route::post('/siswa/import', [\App\Http\Controllers\Superadmin\MasterSiswaController::class, 'importCsv'])->name('siswa.import');
+        Route::delete('/siswa/{id}', [\App\Http\Controllers\Superadmin\MasterSiswaController::class, 'destroy'])->name('siswa.destroy');
+
+        // Akun Siswa (Registered Student Accounts)
+        Route::resource('users', \App\Http\Controllers\Superadmin\SiswaUserController::class)->names([
+            'index' => 'users.index',
+            'create' => 'users.create',
+            'store' => 'users.store',
+            'edit' => 'users.edit',
+            'update' => 'users.update',
+            'destroy' => 'users.destroy',
+        ]);
+        Route::post('/users/{user}/reset-password', [\App\Http\Controllers\Superadmin\SiswaUserController::class, 'resetPassword'])->name('users.reset_password');
+
+        // Akun Admin Management
+        Route::resource('admins', \App\Http\Controllers\Superadmin\AdminController::class)->names([
+            'index' => 'admins.index',
+            'create' => 'admins.create',
+            'store' => 'admins.store',
+            'edit' => 'admins.edit',
+            'update' => 'admins.update',
+            'destroy' => 'admins.destroy',
+        ]);
+        Route::post('/admins/{user}/change-password', [\App\Http\Controllers\Superadmin\AdminController::class, 'changePassword'])->name('admins.change_password');
+
+        // API Cek NIS Cepat
+        Route::get('/api/check-nis/{nis}', [\App\Http\Controllers\Superadmin\DashboardController::class, 'checkNis'])->name('check_nis.api');
+    });
+
+// ─── Auth Routes (Guest Only) ─────────────────────────────────────────────────
+Route::middleware('guest')->group(function () {
+    Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
+    Route::post('/login', [AuthController::class, 'login'])->name('login.post');
+
+    // Registrasi Mandiri Siswa Bengkel
+    Route::get('/register', [RegisterController::class, 'showRegister'])->name('register');
+    Route::post('/register', [RegisterController::class, 'register'])->name('register.post');
+});
+
+Route::post('/logout', [AuthController::class, 'logout'])
+    ->name('logout')
+    ->middleware('auth');
+
+Route::middleware('auth')->group(function () {
+    Route::get('/password/change', [\App\Http\Controllers\PasswordController::class, 'edit'])->name('password.change');
+    Route::put('/password/update', [\App\Http\Controllers\PasswordController::class, 'update'])->name('password.update');
+});
+
+// ─── Admin Bengkel Routes ─────────────────────────────────────────────────────
+Route::prefix('admin')
+    ->middleware(['auth', 'role:admin_bengkel,superadmin'])
+    ->name('admin.')
+    ->group(function () {
+
+        // Dashboard
+        Route::get('/dashboard', [AdminDashboard::class, 'index'])->name('dashboard');
+
+        // Bab 5 Laporan Tugas Akhir
+        Route::get('/bab5', [AdminDashboard::class, 'bab5'])->name('bab5');
+
+        // Manajemen Barang (CRUD Resource)
+        Route::resource('barangs', BarangController::class);
+
+        // Manajemen Peminjaman & Pengembalian
+        Route::get('/peminjaman', [AdminPeminjaman::class, 'index'])->name('peminjaman.index');
+        Route::post('/peminjaman/{id}/kembali', [AdminPeminjaman::class, 'prosesKembali'])->name('peminjaman.kembali');
+
+        // Laporan
+        Route::get('/laporan', [LaporanController::class, 'index'])->name('laporan.index');
+        Route::get('/laporan/export', [LaporanController::class, 'export'])->name('laporan.export');
+
+        // Manajemen User (Siswa) - Read-only untuk Admin Bengkel
+        Route::get('/users', [UserController::class, 'index'])->name('users.index');
+
+        // Materi Pembelajaran
+        Route::resource('materis', MateriController::class)->only(['index', 'create', 'store', 'destroy']);
+    });
+
+// ─── Siswa Routes ─────────────────────────────────────────────────────────────
+Route::prefix('siswa')
+    ->middleware(['auth', 'role:siswa', 'tkr'])
+    ->name('siswa.')
+    ->group(function () {
+
+        // Dashboard / Katalog Barang
+        Route::get('/dashboard', [SiswaDashboard::class, 'index'])->name('dashboard');
+
+        // Peminjaman
+        Route::get('/peminjaman/buat', [SiswaPeminjaman::class, 'create'])->name('peminjaman.create');
+        Route::post('/peminjaman', [SiswaPeminjaman::class, 'store'])->name('peminjaman.store');
+
+        // Riwayat Peminjaman
+        Route::get('/riwayat', [SiswaPeminjaman::class, 'riwayat'])->name('riwayat');
+        Route::post('/peminjaman/{id}/kembali', [SiswaPeminjaman::class, 'prosesKembali'])->name('peminjaman.kembali');
+
+        // Materi Pembelajaran
+        Route::get('/materi', [SiswaMateri::class, 'index'])->name('materi');
+
+        // API Real-time Data
+        Route::get('/api/data', [SiswaDashboard::class, 'apiData'])->name('api.data');
+    });
